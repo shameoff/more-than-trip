@@ -3,22 +3,17 @@ package core
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"log/slog"
 	"mime/multipart"
 	"net/http"
-	"os"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/shameoff/more-than-trip/core/internal/domain/models"
 	"github.com/shameoff/more-than-trip/core/internal/lib/logger/sl"
 )
 
 type CoreService interface {
-	UploadPhoto(ctx context.Context, file multipart.File, fileHeader *multipart.FileHeader, metadata models.Photo) (string, error)
-	DownloadPhoto(ctx context.Context, fileID string) error
+	UploadPhoto(ctx context.Context, file multipart.File, fileHeader *multipart.FileHeader, metadata models.Photo) error
 }
 
 type CoreHandler struct {
@@ -64,45 +59,15 @@ func (h *CoreHandler) UploadPhoto(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Передача файла и метаданных на уровень бизнес-логики
-	photoURL, err := h.service.UploadPhoto(ctx, file, fileHeader, metadata)
+	err = h.service.UploadPhoto(ctx, file, fileHeader, metadata)
 	if err != nil {
 		h.logger.Error("failed to upload file via service", sl.Err(err))
 		http.Error(w, "file upload failed", http.StatusInternalServerError)
 		return
 	}
 
-	h.logger.Info("file uploaded successfully", slog.String("file_url", photoURL))
+	h.logger.Info("file uploaded successfully")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(fmt.Sprintf("File uploaded successfully: %s", photoURL)))
-}
-
-// DownloadPhoto - HTTP handler для скачивания фото
-func (h *CoreHandler) DownloadPhoto(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), time.Second*30)
-	defer cancel()
-
-	fileID := chi.URLParam(r, "fileID")
-	if fileID == "" {
-		h.logger.Error("missing fileID parameter")
-		http.Error(w, "fileID is required", http.StatusBadRequest)
-		return
-	}
-
-	err := h.service.DownloadPhoto(ctx, fileID)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			h.logger.Error("file not found", slog.String("fileID", fileID))
-			http.Error(w, "file not found", http.StatusNotFound)
-		} else {
-			h.logger.Error("failed to download file", sl.Err(err))
-			http.Error(w, "failed to download file", http.StatusInternalServerError)
-		}
-		return
-	}
-
-	h.logger.Info("file downloaded successfully", slog.String("fileID", fileID))
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("File downloaded successfully"))
 }
 
 func (h *CoreHandler) DeletePhoto(w http.ResponseWriter, r *http.Request)  {}
