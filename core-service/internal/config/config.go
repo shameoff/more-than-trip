@@ -29,7 +29,7 @@ type DatabaseConfig struct {
 	Port     int    `yaml:"port"`
 	Database string `yaml:"database"`
 	Username string `yaml:"user"`
-	Password string `env:"PG_PASSWORD" env-required:"true"`
+	Password string `env:"POSTGRES_PASSWORD" env-required:"true"`
 }
 
 type HTTPConfig struct {
