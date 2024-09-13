@@ -12,7 +12,6 @@ func RegisterRoutes(router *chi.Mux, coreHandler *CoreHandler) {
 	router.Get("/api/photos", coreHandler.GetPhotos)
 	router.Delete("/api/photo/{UUID}", coreHandler.DeletePhoto)
 	router.Put("/api/photo/{UUID}", coreHandler.UpdatePhoto)
-	router.Post("/api/photo/{UUID}/tag", coreHandler.TagPhoto)
 	router.Post("/api/photo/{UUID}/like", coreHandler.LikePhoto)
 	router.Post("/api/photo/{UUID}/dislike", coreHandler.DislikePhoto)
 
