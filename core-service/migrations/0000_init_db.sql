@@ -2,7 +2,7 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Таблица пользователя
-CREATE TABLE person (
+CREATE TABLE user_account (
     id UUID PRIMARY KEY,    -- Идентификатор пользователя
     username VARCHAR(250) UNIQUE NOT NULL, -- Имя пользователя (логин)
     full_name VARCHAR(250) NULL, -- Полное имя пользователя
