@@ -13,4 +13,5 @@ database:
 s3:
   bucket_name: "photos"
   endpoint_url: "https://more-than-trip.shameoff.ru:40443"
-  access_key_id: "CHANGEME"
+  access_key_id: "KSUMOdPwwMOSb42cbmCu"
+  photos_bucket: "photos_prod"

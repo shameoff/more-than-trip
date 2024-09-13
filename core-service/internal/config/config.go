@@ -21,6 +21,7 @@ type S3Config struct {
 	Database        string `yaml:"database"`
 	AccessKeyId     string `yaml:"access_key_id"`
 	SecretAccessKey string `env:"AWS_SECRET_ACCESS_KEY" env-required:"true"`
+	PhotosBucket    string `yaml:"photos_bucket"`
 }
 
 type DatabaseConfig struct {

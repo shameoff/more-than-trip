@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -11,12 +12,13 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/shameoff/more-than-trip/core/internal/domain/models"
 	"github.com/shameoff/more-than-trip/core/internal/lib/logger/sl"
 )
 
 type CoreService interface {
-	UploadFile(ctx context.Context, file multipart.File, fileHeader *multipart.FileHeader) (string, error)
-	DeleteFile(ctx context.Context, fileID string) error
+	UploadPhoto(ctx context.Context, file multipart.File, fileHeader *multipart.FileHeader, metadata models.Photo) (string, error)
+	DownloadPhoto(ctx context.Context, fileID string) error
 }
 
 type CoreHandler struct {
@@ -31,11 +33,12 @@ func NewCoreHandler(service CoreService, logger *slog.Logger) *CoreHandler {
 	}
 }
 
-// UploadFile - HTTP handler для загрузки файлов
+// UploadPhoto - HTTP handler для загрузки фото и метаданных
 func (h *CoreHandler) UploadPhoto(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), time.Second*30)
 	defer cancel()
 
+	// Получаем файл из запроса
 	file, fileHeader, err := r.FormFile("file")
 	if err != nil {
 		h.logger.Error("failed to get file from request", sl.Err(err))
@@ -44,19 +47,36 @@ func (h *CoreHandler) UploadPhoto(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	uploadedFilePath, err := h.service.UploadFile(ctx, file, fileHeader)
+	// Получаем метаданные (JSON) из текстового поля
+	metadataStr := r.FormValue("metadata")
+	if metadataStr == "" {
+		h.logger.Error("missing metadata")
+		http.Error(w, "missing metadata", http.StatusBadRequest)
+		return
+	}
+
+	// Парсим метаданные в структуру
+	metadata := models.Photo{}
+	if err := json.Unmarshal([]byte(metadataStr), &metadata); err != nil {
+		h.logger.Error("failed to parse metadata", sl.Err(err))
+		http.Error(w, "invalid metadata format", http.StatusBadRequest)
+		return
+	}
+
+	// Передача файла и метаданных на уровень бизнес-логики
+	photoURL, err := h.service.UploadPhoto(ctx, file, fileHeader, metadata)
 	if err != nil {
-		h.logger.Error("failed to upload file", sl.Err(err))
+		h.logger.Error("failed to upload file via service", sl.Err(err))
 		http.Error(w, "file upload failed", http.StatusInternalServerError)
 		return
 	}
 
-	h.logger.Info("file uploaded successfully", slog.String("file_path", uploadedFilePath))
+	h.logger.Info("file uploaded successfully", slog.String("file_url", photoURL))
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(fmt.Sprintf("File uploaded successfully: %s", uploadedFilePath)))
+	w.Write([]byte(fmt.Sprintf("File uploaded successfully: %s", photoURL)))
 }
 
-// DeleteFile - HTTP handler для удаления файлов
+// DownloadPhoto - HTTP handler для скачивания фото
 func (h *CoreHandler) DownloadPhoto(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), time.Second*30)
 	defer cancel()
@@ -68,21 +88,21 @@ func (h *CoreHandler) DownloadPhoto(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.service.DeleteFile(ctx, fileID)
+	err := h.service.DownloadPhoto(ctx, fileID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			h.logger.Error("file not found", slog.String("fileID", fileID))
 			http.Error(w, "file not found", http.StatusNotFound)
 		} else {
-			h.logger.Error("failed to delete file", sl.Err(err))
-			http.Error(w, "failed to delete file", http.StatusInternalServerError)
+			h.logger.Error("failed to download file", sl.Err(err))
+			http.Error(w, "failed to download file", http.StatusInternalServerError)
 		}
 		return
 	}
 
-	h.logger.Info("file deleted successfully", slog.String("fileID", fileID))
+	h.logger.Info("file downloaded successfully", slog.String("fileID", fileID))
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("File deleted successfully"))
+	w.Write([]byte("File downloaded successfully"))
 }
 
 func (h *CoreHandler) DeletePhoto(w http.ResponseWriter, r *http.Request)  {}
