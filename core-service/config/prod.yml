@@ -1,0 +1,16 @@
+env: "prod"
+
+http:
+  port: 50151
+  timeout: 1h
+
+database:
+  hostname: "more-than-trip.shameoff.ru"
+  port: 45432
+  database: "more_than_trip"
+  user: "more_than_trip"
+
+s3:
+  bucket_name: "photos"
+  endpoint_url: "https://more-than-trip.shameoff.ru:40443"
+  access_key_id: "CHANGEME"

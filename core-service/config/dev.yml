@@ -1,0 +1,11 @@
+env: "dev" # 'local' to plain logs
+
+http:
+  port: 50151
+  timeout: 1h
+
+database:
+  hostname: "localhost"
+  port: 50001
+  database: "core"
+  user: "postgres"
