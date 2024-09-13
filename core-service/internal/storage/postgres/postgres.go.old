@@ -1,0 +1,594 @@
+// Здесь описываются запросы в БД
+
+package postgres
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"strconv"
+	"time"
+
+	"github.com/google/uuid"
+	_ "github.com/jackc/pgx/v4/stdlib"
+	"github.com/shameoff/more-than-trip/core/internal/domain/models"
+
+	// "github.com/shameoff/more-than-trip/core/internal/jaeger"
+	"github.com/shameoff/more-than-trip/core/internal/storage"
+)
+
+type Storage struct {
+	db *sql.DB
+}
+
+func New(dsn string) (*Storage, error) {
+	const op = "storage.postgres.New"
+
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
+
+	if err = db.Ping(); err != nil {
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
+	return &Storage{db: db}, nil
+}
+
+func (s *Storage) CreateIdempotencyOperation(ctx context.Context, id uuid.UUID) error {
+	const op = "storage.postgres.CreateIdempotencyOperation"
+
+	stmt, err := s.db.Prepare("INSERT INTO idempotency_operations (id) VALUES ($1)")
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	// Выполнение запроса
+	_, err = stmt.ExecContext(ctx, id)
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	return nil
+}
+
+func (s *Storage) GetIdempotencyOperation(ctx context.Context, id uuid.UUID) (models.IOp, error) {
+	const op = "storage.postgres.GetIdempotencyOperation"
+
+	query := fmt.Sprintf("SELECT * FROM idempotency_operations WHERE id = '%s'", id)
+	stmt, err := s.db.Prepare(query)
+	if err != nil {
+		return models.IOp{}, fmt.Errorf("%s: %w", op, err)
+	}
+
+	row := stmt.QueryRowContext(ctx)
+
+	var iop models.IOp
+	err = row.Scan(&iop.Id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return models.IOp{Id: ""}, nil
+		}
+
+		return models.IOp{}, fmt.Errorf("%s: %w", op, err)
+	}
+
+	return iop, nil
+}
+
+func (s *Storage) CreateAccount(ctx context.Context, client_id uuid.UUID, currency_type string, is_credit bool) (uuid.UUID, error) {
+	const op = "storage.postgres.CreateAccount"
+
+	// Шаблон запроса
+	stmt, err := s.db.Prepare("INSERT INTO account(id, owner_id, currency_type, is_credit) VALUES( $1, $2, $3, $4 )")
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("%s: %w", op, err)
+	}
+
+	newId := uuid.New()
+
+	// Выполнение запроса
+	_, err = stmt.ExecContext(ctx, newId, client_id, currency_type, is_credit)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("%s: %w", op, err)
+	}
+
+	return newId, nil
+}
+func (s *Storage) CloseAccount(ctx context.Context, id uuid.UUID) error {
+	const op = "storage.postgres.CloseAccount"
+
+	stmt, err := s.db.Prepare("DELETE FROM account WHERE id = $1")
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	_, err = stmt.ExecContext(ctx, id)
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+	return nil
+}
+func (s *Storage) Account(ctx context.Context, id uuid.UUID) (models.Account, error) {
+	const op = "storage.postgres.Account"
+
+	stmt, err := s.db.Prepare("SELECT * FROM account WHERE id = $1")
+	if err != nil {
+		return models.Account{}, fmt.Errorf("%s: %w", op, err)
+	}
+	var account models.Account
+	var updated_at, created_at time.Time
+	// Order of columns in Scan matters!
+	err = stmt.QueryRow(id).Scan(
+		&account.Id, &account.Owner_id,
+		&account.Balance.Currency, &account.Is_credit,
+		&account.Balance.Amount, &created_at, &updated_at,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return models.Account{}, fmt.Errorf("%s: %w", op, storage.ErrAccountNotFound)
+		}
+		return models.Account{}, fmt.Errorf("%s: %w", op, err)
+	}
+
+	return account, nil
+}
+
+func (s *Storage) GetAccountsList(ctx context.Context, showCredits bool) ([]uuid.UUID, error) {
+	const op = "storage.postgres.GetAccountsList"
+
+	query := "SELECT id FROM account"
+	if showCredits {
+		query += "WHERE is_credit != false"
+	}
+	stmt, err := s.db.Prepare(query)
+	if err != nil {
+		return []uuid.UUID{}, fmt.Errorf("%s: %w", op, err)
+	}
+
+	rows, err := stmt.Query()
+	if err != nil {
+		return []uuid.UUID{}, fmt.Errorf("%s: %w", op, err)
+	}
+	account_ids := make([]uuid.UUID, 0, 5) // Задаем минимальный размер slice для повышения производительности
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return []uuid.UUID{}, fmt.Errorf("%s: %w", op, err)
+		}
+		account_ids = append(account_ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return []uuid.UUID{}, fmt.Errorf("%s: %w", op, err)
+	}
+
+	return account_ids, nil
+}
+
+func (s *Storage) GetUserAccountsList(ctx context.Context, client_id uuid.UUID, showCredits bool) ([]uuid.UUID, error) {
+	const op = "storage.postgres.GetAccountsList"
+
+	query := "SELECT id FROM account WHERE owner_id = $1"
+	if showCredits {
+		query += "AND is_credit != false"
+	}
+	stmt, err := s.db.Prepare(query)
+	if err != nil {
+		return []uuid.UUID{}, fmt.Errorf("%s: %w", op, err)
+	}
+
+	rows, err := stmt.Query(client_id)
+	if err != nil {
+		return []uuid.UUID{}, fmt.Errorf("%s: %w", op, err)
+	}
+	account_ids := make([]uuid.UUID, 0, 5) // Задаем минимальный размер slice для повышения производительности
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return []uuid.UUID{}, fmt.Errorf("%s: %w", op, err)
+		}
+		account_ids = append(account_ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return []uuid.UUID{}, fmt.Errorf("%s: %w", op, err)
+	}
+
+	return account_ids, nil
+}
+func (s *Storage) TransferMoney(ctx context.Context, from_account_id uuid.UUID, to_account_id uuid.UUID, amount float64) error {
+	const op = "storage.postgres.TransferMoney"
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+	stmtSender, err := tx.Prepare("UPDATE account SET balance = balance - $1 WHERE id = $2")
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf("%s: %w", op, err)
+	}
+	defer stmtSender.Close()
+
+	// Подготавливаем запрос для обновления баланса на втором счете
+	stmtReceiver, err := tx.Prepare("UPDATE account SET balance = balance + $1 WHERE id = $2")
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf("%s: %w", op, err)
+	}
+	defer stmtReceiver.Close()
+
+	// Выполняем оба запроса
+	_, err = stmtSender.Exec(amount, from_account_id)
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	_, err = stmtReceiver.Exec(amount, to_account_id)
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	// Если все запросы выполнены успешно, фиксируем транзакцию
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+	return nil
+}
+func (s *Storage) Withdraw(ctx context.Context, from_account_id uuid.UUID, amount float64) error {
+	const op = "storage.postgres.Withdraw"
+
+	// Шаблон запроса
+	stmt, err := s.db.Prepare("UPDATE account SET balance = balance - $1 WHERE id = $2")
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	// Выполнение запроса
+	_, err = stmt.ExecContext(ctx, amount, from_account_id)
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	return nil
+}
+func (s *Storage) Deposit(ctx context.Context, to_account_id uuid.UUID, amount float64) error {
+	const op = "storage.postgres.Deposit"
+
+	// Шаблон запроса
+	stmt, err := s.db.Prepare("UPDATE account SET balance = balance + $1 WHERE id = $2")
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	// Выполнение запроса
+	_, err = stmt.ExecContext(ctx, amount, to_account_id)
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	return nil
+}
+
+func (s *Storage) WriteToHistory(ctx context.Context, record models.HistoryRecord) error {
+	const op = "storage.postgres.WriteToHistory"
+	var query string
+
+	switch record.OperationType {
+	case "OPERATION_TYPE_DEPOSIT":
+		{
+			query = `
+			INSERT INTO transaction_history(
+				account_id, operation_type, 
+				money_sent_amount, money_sent_currency_type,
+				money_got_amount, money_got_currency_type
+			) VALUES($1, 'OPERATION_TYPE_DEPOSIT', $2, $3, $4, $5)`
+			stmt, err := s.db.Prepare(query)
+			if err != nil {
+				return fmt.Errorf("%s: %w", op, err)
+			}
+
+			_, err = stmt.ExecContext(
+				ctx, record.AccountId,
+				record.MoneySent.Amount, record.MoneySent.Currency,
+				record.MoneyGot.Amount, record.MoneyGot.Currency,
+			)
+			if err != nil {
+				return fmt.Errorf("%s: %w", op, err)
+			}
+		}
+	case "OPERATION_TYPE_WITHDRAW":
+		{
+			query = `INSERT INTO transaction_history(
+				account_id, operation_type,
+				money_sent_amount, money_sent_currency_type,
+				money_got_amount, money_got_currency_type
+			) VALUES($1, 'OPERATION_TYPE_WITHDRAW', $2, $3, $4, $5)`
+			stmt, err := s.db.Prepare(query)
+			if err != nil {
+				return fmt.Errorf("%s: %w", op, err)
+			}
+
+			_, err = stmt.ExecContext(
+				ctx, record.AccountId,
+				record.MoneySent.Amount, record.MoneySent.Currency,
+				record.MoneyGot.Amount, record.MoneyGot.Currency,
+			)
+			if err != nil {
+				return fmt.Errorf("%s: %w", op, err)
+			}
+		}
+	case "OPERATION_TYPE_TRANSFER":
+		{
+			tx, err := s.db.Begin()
+			if err != nil {
+				return fmt.Errorf("%s: %w", op, err)
+			}
+			query = `INSERT INTO transaction_history(
+				account_id, operation_type, account_to_id,
+				money_sent_amount, money_sent_currency_type,
+				money_got_amount, money_got_currency_type
+			) VALUES($1, 'OPERATION_TYPE_TRANSFER_TO', $2, $3, $4, $5, $6)`
+			stmt, err := tx.Prepare(query)
+			if err != nil {
+				fmt.Println("ОШИБКА ПРИ ГЕНЕРАЦИИ ПЕРВОГО ЗАПРОСА")
+				return fmt.Errorf("%s: %w", op, err)
+			}
+
+			_, err = stmt.ExecContext(
+				ctx, record.AccountId, record.AccountTo,
+				record.MoneySent.Amount, record.MoneySent.Currency,
+				record.MoneyGot.Amount, record.MoneyGot.Currency,
+			)
+			if err != nil {
+				fmt.Println("ОШИБКА ПРИ ИСПОЛНЕНИИ ПЕРВОГО ЗАПРОСА")
+				return fmt.Errorf("%s: %w", op, err)
+			}
+
+			query2 := `INSERT INTO transaction_history(
+				account_id, operation_type, account_from_id,
+				money_sent_amount, money_sent_currency_type,
+				money_got_amount, money_got_currency_type
+			) VALUES($1, 'OPERATION_TYPE_TRANSFER_FROM', $2, $3, $4, $5, $6)`
+			stmt2, err := tx.Prepare(query2)
+			if err != nil {
+				fmt.Println("ОШИБКА ПРИ ГЕНЕРАЦИИ ВТОРОГО ЗАПРОСА")
+				return fmt.Errorf("%s: %w", op, err)
+			}
+			_, err = stmt2.ExecContext(
+				ctx, record.AccountTo, record.AccountId,
+				record.MoneySent.Amount, record.MoneySent.Currency,
+				record.MoneyGot.Amount, record.MoneyGot.Currency,
+			)
+			if err != nil {
+				fmt.Println("ОШИБКА ПРИ ИСПОЛНЕНИИ ВТОРОГО ЗАПРОСА")
+				return fmt.Errorf("%s: %w", op, err)
+			}
+
+			if err = tx.Commit(); err != nil {
+				return fmt.Errorf("%s: %w", op, err)
+			}
+		}
+	case "OPERATION_TYPE_CREATION":
+		{
+			query = "INSERT INTO transaction_history(account_id, operation_type) VALUES($1, 'OPERATION_TYPE_CREATION')"
+			stmt, err := s.db.Prepare(query)
+			if err != nil {
+				return fmt.Errorf("%s: %w", op, err)
+			}
+
+			_, err = stmt.ExecContext(ctx, record.AccountId)
+			if err != nil {
+				return fmt.Errorf("%s: %w", op, err)
+			}
+		}
+	case "OPERATION_TYPE_CLOSURE":
+		{
+			query = "INSERT INTO transaction_history(account_id, operation_type) VALUES($1, 'OPERATION_TYPE_CLOSURE')"
+			stmt, err := s.db.Prepare(query)
+			if err != nil {
+				return fmt.Errorf("%s: %w", op, err)
+			}
+
+			_, err = stmt.ExecContext(ctx, record.AccountId)
+			if err != nil {
+				return fmt.Errorf("%s: %w", op, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// ReadHistory возвращает историю операций по счету ИЛИ клиенту.
+// Если оба не uid.Nil, приоритет у аккаунта.
+// Если оба uid.Nil, возвращает пустой список и ошибку.
+func (s *Storage) ReadHistory(ctx context.Context, account_id uuid.UUID, client_id uuid.UUID) ([]models.HistoryRecord, error) {
+	const op = "storage.postgres.ReadAccountHistory"
+	var arg uuid.UUID
+	query := `
+	SELECT 	th.id, th.account_id, th.operation_type, 
+			th.money_sent_amount, th.money_sent_currency_type, 
+			th.money_got_amount, th.money_got_currency_type, 
+			th.account_to_id, th.account_from_id, th.transacted_at
+	FROM transaction_history th`
+
+	if account_id != uuid.Nil {
+		query += " WHERE account_id = $1"
+		arg = account_id
+	} else if client_id != uuid.Nil {
+		query += " JOIN accounts a ON th.account_id = a.id WHERE a.owner_id = $1"
+		arg = client_id
+	} else {
+		return []models.HistoryRecord{}, fmt.Errorf("%s: %w", op, errors.New("both account_id and client_id are nil"))
+	}
+
+	stmt, err := s.db.Prepare(query)
+	if err != nil {
+		return []models.HistoryRecord{}, fmt.Errorf("%s: %w", op, err)
+	}
+
+	rows, err := stmt.Query(arg)
+	if err != nil {
+		return []models.HistoryRecord{}, fmt.Errorf("%s: %w", op, err)
+	}
+
+	records := make([]models.HistoryRecord, 0, 5)
+	for rows.Next() {
+		var record models.HistoryRecord
+		var MoneySentAmount, MoneySentCurrency,
+			MoneyGotAmount, MoneyGotCurrency,
+			AccountToId, AccountFromId sql.NullString
+
+		if err := rows.Scan(
+			&record.Id, &record.AccountId,
+			&record.OperationType,
+			&MoneySentAmount, &MoneySentCurrency,
+			&MoneyGotAmount, &MoneyGotCurrency,
+			&AccountToId, &AccountFromId, &record.TransactedAt,
+		); err != nil {
+			return []models.HistoryRecord{}, fmt.Errorf("%s: %w", op, err)
+		}
+		if MoneySentAmount.Valid && MoneySentCurrency.Valid {
+			amount, err := strconv.ParseFloat(MoneySentAmount.String, 64)
+			if err == nil {
+				record.MoneySent = models.Money{
+					Amount:   amount,
+					Currency: MoneySentCurrency.String,
+				}
+			}
+		}
+		if MoneyGotAmount.Valid && MoneyGotCurrency.Valid {
+			amount, err := strconv.ParseFloat(MoneyGotAmount.String, 64)
+			if err == nil {
+				record.MoneyGot = models.Money{
+					Amount:   amount,
+					Currency: MoneyGotCurrency.String,
+				}
+			}
+		}
+		if AccountToId.Valid {
+			record.AccountTo, _ = uuid.Parse(AccountToId.String)
+		}
+		if AccountFromId.Valid {
+			record.AccountFromId, _ = uuid.Parse(AccountFromId.String)
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return []models.HistoryRecord{}, fmt.Errorf("%s: %w", op, err)
+	}
+
+	return records, nil
+}
+
+// GetCurrencyNames возвращает названия валют из БД.
+func (s *Storage) GetCurrencyTypes(ctx context.Context) ([]string, error) {
+	const op = "storage.postgres.GetCurrencyNames"
+
+	query := "SELECT type FROM currencies"
+	stmt, err := s.db.Prepare(query)
+	if err != nil {
+		return []string{}, fmt.Errorf("%s: %w", op, err)
+	}
+
+	rows, err := stmt.Query()
+	if err != nil {
+		return []string{}, fmt.Errorf("%s: %w", op, err)
+	}
+
+	names := make([]string, 0, 5)
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return []string{}, fmt.Errorf("%s: %w", op, err)
+		}
+		names = append(names, name)
+	}
+
+	return names, nil
+}
+
+// GetCurrencies возвращает список валют из БД.
+func (s *Storage) GetCurrencies(ctx context.Context) ([]models.Currency, error) {
+	query := "SELECT type, rate FROM currencies"
+	stmt, err := s.db.Prepare(query)
+	if err != nil {
+		return []models.Currency{}, err
+	}
+
+	rows, err := stmt.Query()
+	if err != nil {
+		return []models.Currency{}, err
+	}
+
+	currencies := make([]models.Currency, 0, 5)
+	for rows.Next() {
+		var currency models.Currency
+		if err := rows.Scan(&currency.Type, &currency.Rate); err != nil {
+			return []models.Currency{}, err
+		}
+		currencies = append(currencies, currency)
+	}
+
+	return currencies, nil
+}
+
+// GetCurrencyByType возвращает валюту из БД по типу.
+func (s *Storage) GetCurrencyByType(ctx context.Context, curType string) (models.Currency, error) {
+	query := "SELECT type, rate FROM currencies WHERE type = $1"
+
+	stmt, err := s.db.Prepare(query)
+	if err != nil {
+		return models.Currency{}, err
+	}
+
+	var currency models.Currency
+
+	err = stmt.QueryRow(curType).Scan(&currency.Type, &currency.Rate)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return models.Currency{}, storage.ErrCurrencyNotFound
+		}
+		return models.Currency{}, err
+	}
+
+	return currency, nil
+}
+
+// SaveCurrencies сохраняет список валют в БД.
+func (s *Storage) SaveCurrencies(ctx context.Context, currencies []models.Currency) error {
+
+	if len(currencies) == 0 {
+		return fmt.Errorf("<currencies> us empty")
+	}
+
+	for _, currency := range currencies {
+		// Проверяем существует ли валюта в базе данных
+		var count int
+		err := s.db.QueryRow("SELECT COUNT(*) FROM currencies WHERE type = $1", currency.Type).Scan(&count)
+		if err != nil {
+			return err
+		}
+
+		if count > 0 {
+			// Если валюта существует, делаем UPDATE
+			_, err = s.db.Exec("UPDATE currencies SET rate = $1 WHERE type = $2", currency.Rate, currency.Type)
+			if err != nil {
+				return err
+			}
+			// fmt.Printf("Валюта %s обновлена успешно\n", currency.Type)
+		} else {
+			// Если валюта не существует, делаем INSERT
+			_, err = s.db.Exec("INSERT INTO currencies(type, rate) VALUES ($1, $2)", currency.Type, currency.Rate)
+			if err != nil {
+				return err
+			}
+			// fmt.Printf("Валюта %s добавлена успешно\n", currency.Type)
+		}
+	}
+
+	return nil
+}
