@@ -48,6 +48,6 @@ func (s *S3Storage) UploadPhoto(ctx context.Context, file multipart.File, fileSi
 	}
 
 	// Возвращаем URL загруженного файла
-	fileURL := fmt.Sprintf("https://%s.s3.amazonaws.com/%s", s.bucket, fileName)
+	fileURL := fmt.Sprintf("https://s3-minio.shameoff.ru/%s/%s", s.bucket, fileName)
 	return fileURL, nil
 }
