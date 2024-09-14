@@ -45,6 +45,7 @@ services:
       - ENV=prod
       - POSTGRES_PASSWORD
       - AWS_SECRET_ACCESS_KEY
+      - AWS_ACCESS_KEY_ID
     ports:
       - "50051:50051"
     expose:
@@ -62,8 +63,8 @@ services:
     volumes:
       - "/opt/more-than-trip/nginx.conf:/etc/nginx/conf.d/nginx.conf:ro"
       - "/opt/more-than-trip/certbot:/var/www/certbot"
-      - "/opt/more-than-trip/certs:/etc/letsencrypt"
-
+      - "/opt/more-than-trip/letsencrypt/etc:/etc/letsencrypt"
+      - "/opt/more-than-trip/letsencrypt/var:/var/lib/letsencrypt"
   app-frontend: # Заглушка, потом будет фронт
     image: nginx:1.27.1
     expose:
