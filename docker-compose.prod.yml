@@ -37,3 +37,35 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  app-core:
+    image: shameoff/mtt-backend:latest
+    command: "-config prod.yml"
+    environment:
+      - ENV=prod
+      - POSTGRES_PASSWORD
+      - AWS_SECRET_ACCESS_KEY
+    ports:
+      - "50051:50051"
+    expose:
+      - "50051"
+    depends_on:
+      - postgres
+      - minio
+    
+  nginx:
+    image: nginx:1.27.1
+    ports:
+      - "80:80"
+      - "443:443"
+    restart: unless-stopped
+    volumes:
+      - "/opt/more-than-trip/nginx.conf:/etc/nginx/conf.d/nginx.conf:ro"
+      - "/opt/more-than-trip/certbot:/var/www/certbot"
+      - "/opt/more-than-trip/certs:/etc/letsencrypt"
+
+  app-frontend: # Заглушка, потом будет фронт
+    image: nginx:1.27.1
+    expose:
+      - "80"
+    restart: unless-stopped
