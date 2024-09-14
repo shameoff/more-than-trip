@@ -10,8 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	httpapp "github.com/shameoff/more-than-trip/core/internal/app/http"
 	"github.com/shameoff/more-than-trip/core/internal/config"
-	"github.com/shameoff/more-than-trip/core/internal/http-server/core"
-	routes "github.com/shameoff/more-than-trip/core/internal/http-server/core"
+	controllers "github.com/shameoff/more-than-trip/core/internal/http-server/core"
 	"github.com/shameoff/more-than-trip/core/internal/lib/converter"
 	"github.com/shameoff/more-than-trip/core/internal/lib/logger/sl"
 	coreService "github.com/shameoff/more-than-trip/core/internal/services/core"
@@ -61,11 +60,11 @@ func New(log *slog.Logger,
 
 	// Init core service (Business Logic Layer)
 	coreService := coreService.NewCoreService("TOBECONTINUED", log, storage, s3PhotoService)
-	coreHandler := core.NewCoreHandler(coreService, log)
+	coreHandler := controllers.NewCoreHandler(coreService, log)
 
 	// Создание HTTP обработчика
 	httpServer := httpapp.New(log, config.HTTP.Port)
-	routes.RegisterRoutes(httpServer.Router, coreHandler)
+	controllers.RegisterRoutes(httpServer.Router, coreHandler)
 
 	// // Init swagger
 	httpServer.Router.Get("/swagger/*", httpSwagger.Handler(
