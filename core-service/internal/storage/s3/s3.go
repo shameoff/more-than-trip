@@ -1,6 +1,7 @@
 package s3
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"mime/multipart"
@@ -37,7 +38,7 @@ func (s *S3Storage) UploadPhoto(ctx context.Context, file multipart.File, fileSi
 	uploadParams := &s3.PutObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(filepath.Base(fileName)),
-		Body:   file,
+		Body:   bytes.NewReader(fileBytes),
 	}
 
 	// Загрузка файла на S3

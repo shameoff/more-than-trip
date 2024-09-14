@@ -5,8 +5,8 @@ API_ENDPOINT="https://mtt.shameoff.ru"
 # Фото
 # Загрузка фото
 curl -X POST "${API_ENDPOINT}/api/photo" \
--F "file=@/path/to/photo.jpg" \
--F "metadata={\"Coords\":\"51.5074,-0.1278\",\"Description\":\"A beautiful view of London\",\"Place\":\"London\",\"RegionId\":\"550e8400-e29b-41d4-a716-446655440000\",\"TripId\":\"550e8400-e29b-41d4-a716-446655440001\",\"UserId\":\"550e8400-e29b-41d4-a716-446655440002\"}"
+-F "file=@/Users/e.shamov/Downloads/img.jpg" \
+-F 'metadata={"Coords": "45.12345, 90.12345", "Description": "Sample photo", "Place": "New York", "RegionId": "f47ac10b-58cc-4372-a567-0e02b2c3d479", "TripId": "d9bfbced-fd19-4886-8e45-cb5e92b4d7d1", "UserId": "c56a4180-65aa-42ec-a945-5fd21dec0538"}'
 
 # Получение фото по UUID
 curl -X GET "${API_ENDPOINT}/api/photo/550e8400-e29b-41d4-a716-446655440000"
