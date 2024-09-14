@@ -7,15 +7,17 @@ RUN go mod download
 COPY . .
 
 # Компилируем приложение
-RUN go build -o /app/main ./cmd/core/main.go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o main ./cmd/core/main.go
 
-FROM busybox:latest
+
+FROM alpine:latest
 WORKDIR /app
 
 # Копируем бинарный файл из этапа сборки
-COPY --from=builder /app/main /app/config/ ./
+COPY --from=builder /app/main /app/config/*.yml ./
 # RUN apk --no-cache add ca-certificates
 
 EXPOSE 50151
 
-CMD ["./main", "-config", "dev.yml"]
+ENTRYPOINT [ "./main"]
+CMD ["-config", "dev.yml"]
