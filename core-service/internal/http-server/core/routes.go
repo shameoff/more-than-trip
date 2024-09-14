@@ -8,6 +8,7 @@ import (
 // Вызывается после инициализации хендлеров(контроллеров)
 func RegisterRoutes(router *chi.Mux, coreHandler *CoreHandler) {
 	// Эндпоинты для загрузки и удаления фото
+	router.Post("/api/photo", coreHandler.UploadPhoto)
 	router.Get("/api/photo/{UUID}", coreHandler.GetPhoto)
 	router.Get("/api/photos", coreHandler.GetPhotos)
 	router.Delete("/api/photo/{UUID}", coreHandler.DeletePhoto)
