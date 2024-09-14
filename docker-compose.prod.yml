@@ -47,9 +47,9 @@ services:
       - AWS_SECRET_ACCESS_KEY
       - AWS_ACCESS_KEY_ID
     ports:
-      - "50051:50051"
+      - "50051:50151"
     expose:
-      - "50051"
+      - "50151"
     depends_on:
       - postgres
       - minio
